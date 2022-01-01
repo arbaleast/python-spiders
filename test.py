@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.support.select import Select
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -13,10 +14,16 @@ service = Service('D:\\Program Files\\geckodriver.exe')
 driver = webdriver.Firefox(service=service, options=options)
 driver.implicitly_wait(30)
 #目标链接
-url = 'http://www.jianbiaoku.com/webarbs/book/421/4246194.shtml'
+url = 'http://www.jianbiaoku.com/webarbs/book/421/4246213.shtml'
 # 打开网页
 driver.get(url)
 
+def check_element_exists(driver, condition, element):               #检查元素是否存在
+    try:
+        driver.find_element(condition, element)
+        return True
+    except Exception as e:
+        return False
 
 def get_file_name():                                                #获取规范名
     file_name = driver.find_element(By.CSS_SELECTOR, 'span.catalog_name a').text
@@ -38,8 +45,9 @@ def del_hide(content):                                              #迭代，�
 
 def get_img_lct(element):                                           #获取图片位置序号和图片资源
     i = 0
+    left = 0
+    img_src = {'img_total': 0, 'element_left': 0, 'img_total': 0}                                #初始化字典值： img_total, element_left, img_path
     #print(len(element))
-    img_src = {}
     
     while i < len(element):
 
@@ -55,63 +63,76 @@ def get_img_lct(element):                                           #获取图�
             #print(len(img_src), img_src, left)
             return img_src
         else:
-            left = 0
-            img_src["img_total"] = 0                                #初始化字典值： img_total, element_left, img_path
-            img_src["element_left"] = 0
             i += 1 
     return img_src
 
-def img_order(dic):
+def img_order(dic):                                                 #同上
     tmp_list = list(dic.keys())
     b = tmp_list[2:]
     return b       
 
-def get_content():
-    all_content = driver.find_elements(By.CSS_SELECTOR, 'div.book_right>div>p')                            
-    left_elements = del_hide(all_content)                                                                   #删除内容标签的隐藏元素
+def title_level(order):                                             #对标题分级
+    tmp = re.split(r'[.]', order)
+    match len(tmp):
+        case 3:                                                     #三级标题
+            return '-'
+        case 1:
+            return '\t-'
 
-    img_path = get_img_lct(left_elements)                                                               #获取图片位置，内容
+def write_body():                                                   #写入数据
+    title_tmp = driver.find_elements(By.CSS_SELECTOR, 'div.book_right>div.book-content-show>div,p>p>span')      
+    main = driver.find_elements(By.CSS_SELECTOR, 'div.book_right>div.book-content-show>p')
+
+    left_elements = del_hide(main)                                                                         #删除内容标签的隐藏元素
+
+    img_path = get_img_lct(left_elements)                                                                   #获取图片序数，内容，数量，并写入字典
     #print(img_path)
 
     k = 0
-    i = 0                                                                                               #遍历按顺序、层级写入文本，图片
-    while i < len(left_elements) - int(img_path["img_total"]):                                                                                                                                           
-        body_content = driver.find_elements(By.CSS_SELECTOR, 'div.book_right>div>p')[i].text                                          
-        print('写入内容：', body_content)
-
-        write_to_file(body_content)
-
-        if i in img_order(img_path):
+    i = 0                                                                                                   #遍历按顺序、层级写入文本，图片
+    while i < len(left_elements):                                                                           #循环次数=除隐藏外的文本、图片元素总数
+        if left_elements[i].tag_name == 'div':
+            title_del = title_tmp[i].text
+            title = '#' + title_del
+            write_to_file(title)
+        elif i in img_order(img_path):                                                                        #判断写入行是否为图片；否,则继续写入文字
             a = img_path[img_order(img_path)[k]]
-            b = "[" + body_content +"]" + "(" + a + ")"
+            b = "![]" + "(" + a + ")"
             write_to_file(b)
             print(a)
-            k += 1
-        
+            k += 1                                                                                           
+        else:
+            body_tmp = left_elements[i].text                #写入文本元素
+            body = re.split(r'[\u2002]+', body_tmp,1)
+            if len(body) == 2:                          
+                level = title_level(body[0])
+                write_to_file(level + body[0] + '\t' + body[1])
+                print('写入内容：', level, body[0], '\t', body[1])
+            else:
+                print(body[0])
+                write_to_file(body[0])
+            
         i += 1
 
-def deal_content_level():                                                   #将获取到的内容写入字典
+def get_content_level():                                            #将获取到的内容写入字典
     tmp_level = driver.find_element(By.CSS_SELECTOR, 'ul.book_catalog>li.li_selected').get_attribute('data-level')        ###判断当前选择的层                                                                                           
     data_level = int(tmp_level)
     print('\n\n目录层级：', data_level)                                                     #打印当前层级的class属性，显示当前所在层级
 
     match data_level:                                                                                        #对不同层级，分情况处理
         case 1:
-            all_content = driver.find_elements(By.CSS_SELECTOR, 'div.book_right>div>p')                            
-            left_elements = del_hide(all_content)
-            img_path = get_img_lct(left_elements)
-
-            l = 0 
-            while l < len(left_elements) - int(img_path["img_total"]):
-                body_content = driver.find_elements(By.CSS_SELECTOR, 'div.book_container>div.book_right>div>p')[l].text
-                write_to_file(body_content)
-                l += 1
-        case 2:                                                                                                 ###对前选择的层级，文本和图片写入md文档
-            get_content()
+            write_body()
+        case 2:
+            print('判断内容是否重复')
+            if check_element_exists(driver, By.CSS_SELECTOR, 'ul.book_catalog>li.li_selected>span.fold.icon_down'):
+                msg = print('跳过重复部分')
+                return msg
+            else:
+                write_body()
         case 3:
-            get_content()
+            write_body()
 
-def write_to_file(text):                                                 #命名，并保存文本
+def write_to_file(text):                                            #命名，并保存文本
     f=open( get_file_name() + '.md','a+', encoding='utf-8')
     f.writelines(text + '\n')
     f.close()
@@ -132,21 +153,13 @@ def iterate_catalog():                                              #判断所�
         i += 1
                     
 def main():
-    #对规范目录进行迭代
-
-
     while iterate_catalog():   #当未遍历到最后目录时继续下载文本
-        deal_content_level()
+        get_content_level()
         driver.find_element(By.CSS_SELECTOR, '.next_catalog>a').click()
     else:
-        deal_content_level()
-    
-
+        get_content_level()
     print("all text has download")  #下载完输出已完成
                 
 
 main()
-#getContent()
-#write_to_file("123", "something")
-#iterate_catalog()
 driver.quit()
